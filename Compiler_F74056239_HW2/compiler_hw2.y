@@ -12,12 +12,13 @@ void yyerror(char* s);
 /* Symbol table function - you can add new function if needed. */
 int lookup_symbol();
 void create_symbol();
-void insert_symbol(int k, char nat[], int s);
+void insert_symbol(int k, char name[], char type[], char attr[], int s, int fdcl);
 void dump_symbol(int s);
 void semantic_error();//detect semantic error
 struct Table
 {
     int flag;
+    int func_fdcl;
     char name[20];
     char kind[20];
     char type[20];
@@ -28,8 +29,7 @@ struct Table
 struct Table stb[t_size];//symble table
 int stb_idx = 0;//symble table index
 int Scope = 0;
-int dflag = 0;//dflag = 1 if current line is a declaration statment
-int uflag = 0;
+int se_flag = 0;//semantic error check flag 0-> rv, 3-> rf, 1-> uv, 2-> uf 
 int syerr = 0;//syntax error
 char errmsg1[500] = {0};//error msg
 char errmsg2[500] = {0};
@@ -37,7 +37,7 @@ char errmsg2[500] = {0};
     uflag:
     1 -> check variable, 2-> check function
 */
-char dname[20] = {0};//current declaration's name
+char tn[30] = {0};//current declaration variable name
 %}
 
 /* Use variable or self-defined structure to represent
@@ -72,12 +72,12 @@ char dname[20] = {0};//current declaration's name
 
 /* Nonterminal with return, which need to sepcify type */
 %type <string> type
-%type <string> DCL_specify
 %type <string> declaration
 %type <string> func_parameter
 %type <string> func_declaration
-/*%type <f_val> stat
-/*%type <f_val> initializer
+
+/*%type <f_val> stat*/
+/*%type <f_val> initializer*/
 
 
 /* Yacc will start at this nonterminal */
@@ -92,21 +92,17 @@ program
     |
 
 stat
-    : declaration { if(!strcmp("", errmsg1))
-                        insert_symbol(1, $1, Scope);
-                  }
+    : declaration 
     | expression_stat
-    | func_declaration {    insert_symbol(0, $1, Scope); 
-                       }
+    | func_declaration
     | print_func
     | return_stat
     | C_COM
     | CPP_COM
 ;
-
 /* expression statement */
 expression_stat
-    : ID assignment expr SEMICOLON
+    : ID assignment expr SEMICOLON { se_flag = 1; sprintf(tn, "%s", $1); semantic_error(1, $1); }
     | postfix SEMICOLON
 ;
 assignment
@@ -149,7 +145,7 @@ postfix_operater
 ;
 term
     : LB expr RB
-    | ID { /*uflag = 1; strcpy(dname, $1);*/ semantic_error(1, $1);}
+    | ID { se_flag = 1; sprintf(tn, "%s", $1); semantic_error(1, $1);}
     | STR_CONST
     | number
     | func_call
@@ -157,7 +153,7 @@ term
 number
     : I_CONST 
     | F_CONST
-    | SUB I_CONST/* negative number */
+    | SUB I_CONST
     | SUB F_CONST
 ;
 
@@ -184,9 +180,11 @@ while_content
     | while_content content_stat
 ;
 /* function declaration */
-func_declaration
-    : DCL_specify LB func_parameter RB LCB func_content RCB { sprintf($$, "%s %s", $1, $3); sprintf($3, "%s", ""); }
-    | DCL_specify LB RB LCB func_content RCB {sprintf($$, "%s %s", $1, ""); }  
+func_declaration 
+    : type ID LB func_parameter RB LCB func_content RCB { semantic_error(3, $2); insert_symbol(0, $2, $1, $4, Scope, 0); }
+    | type ID LB RB LCB func_content RCB { semantic_error(3, $2); insert_symbol(0, $2, $1, "", Scope, 0); }  
+    | type ID LB func_parameter RB SEMICOLON { semantic_error(3, $2); insert_symbol(0, $2, $1, $4, Scope, 1); }
+    | type ID LB RB SEMICOLON { semantic_error(3, $2); insert_symbol(0, $2, $1, "", Scope, 1); }
 ;
 
 func_content
@@ -197,46 +195,26 @@ func_content
 content_stat
     : compound_stat 
     | expression_stat
-    | declaration {  if(!strcmp("", errmsg1))
-                        insert_symbol(1, $1, Scope); 
-                  }
+    | declaration
     | print_func 
     | C_COM
     | CPP_COM
 
 func_parameter
-   /* :               { printf("hi");sprintf($$, "%s", "");printf("hi2");}*/
-    : DCL_specify { if(!strcmp("", errmsg1))
-                    {   
-                        insert_symbol(2, $1, Scope+1);//insert parameter
-                    }
-                    sscanf($1, "%s", $$);
-                  }
-    | func_parameter COMMA DCL_specify {    if(!strcmp("", errmsg1))
-                                                insert_symbol(2, $3, Scope+1);//insert parameter
-                                            char t1[20] = {0};
-                                            sscanf($3, "%s", t1); 
-                                            sprintf($$, "%s, %s", $1, t1); 
-                                       }
+    : type ID { insert_symbol(2, $2, $1, "", Scope+1, 0); sprintf($$, "%s", $1); }
+    | func_parameter COMMA type ID { insert_symbol(2, $4, $3, "", Scope+1, 0); sprintf($$, "%s, %s", $1, $3); }
 ;
 
 /* declaration */
 declaration 
-    : DCL_specify SEMICOLON { $$ = $1; }
-    | DCL_specify ASGN expr SEMICOLON { $$ = $1; }
-;
-
-DCL_specify
-    : type ID { sprintf($$, "%s %s", $1, $2);    
-                //strcpy(dname, $2);
-                semantic_error(0, $2);
-              }
+    : type ID SEMICOLON { se_flag = 0; sprintf(tn, "%s", $2); semantic_error(0, $2); insert_symbol(1, $2, $1, "", Scope, 0); }
+    | type ID ASGN expr SEMICOLON { se_flag = 0; sprintf(tn, "%s", $2); semantic_error(0, $2); insert_symbol(1, $2, $1, "", Scope, 0); }
 ;
 
 /* print function */
 print_func
     : PRINT LB STR_CONST RB SEMICOLON
-    | PRINT LB ID RB SEMICOLON { semantic_error(1, $3); }
+    | PRINT LB ID RB SEMICOLON { se_flag = 1; sprintf(tn, "%s", $3); semantic_error(1, $3); }
 ;
 
 /* return statement */
@@ -249,8 +227,8 @@ return_stat
 
 /* function call */
 func_call
-    : ID LB func_call_parameter RB { /*uflag = 2; strcpy(dname, $1);*/ semantic_error(2, $1);}
-    | ID LB RB { /*uflag = 2; strcpy(dname, $1);*/ semantic_error(2, $1); }
+    : ID LB func_call_parameter RB { se_flag = 2; sprintf(tn, "%s", $1); semantic_error(2, $1); }
+    | ID LB RB { se_flag = 2; sprintf(tn, "%s", $1); semantic_error(2, $1); }
 ;
 func_call_parameter 
     : expr
@@ -286,23 +264,26 @@ void yyerror(char *s)
 {
     printf("%d: %s\n", yylineno+1, buf);
     //check if there is also a semantic error
-    ++yylineno;
-    if(uflag == 1)
+    if(se_flag == 1)
     {
-        semantic_error(1, dname);
-        uflag = 0;
+        semantic_error(1, tn);
+        se_flag = 0;
     }
-    else if(uflag == 2)
+    else if(se_flag == 2)
     {
-        semantic_error(2, dname);
-        uflag = 0;
+        semantic_error(2, tn);
+        se_flag = 0;
     }
-    if(dflag)
+    else if(se_flag == 0)
     {
-        semantic_error(0, dname);
-        dflag = 0;
+        semantic_error(0, tn);
+        se_flag = 0;
     }
-    --yylineno;
+    else if(se_flag == 3)
+    {
+        semantic_error(3, tn);
+        se_flag = 0;
+    }
     if(strcmp("", errmsg1))
     {
         sprintf(errmsg1, "%s%s\n", errmsg1, buf);
@@ -330,54 +311,50 @@ void create_symbol()
         stb[i].flag = 0;
     }
 }
-void insert_symbol(int k, char nat[]/*name and type*/, int s) 
+void insert_symbol(int k, char name[], char type[], char attr[], int s, int func_fdcl) 
 {
-    //k: 0->func, 1->variable, 2-> parameter
-    char tn[20] = {0};//name
-    char tt[20] = {0};//type
-    if(k == 0)
+    if(!strcmp("", errmsg1))
     {
-        char att[30] = {0};//temp attrubute
-        sscanf(nat, "%s %s", tt, tn);
-        int sn = 0, i = 0;
-        while(sn < 2)
+        //k: 0->func, 1->variable, 2-> parameter
+        if(k == 0 && func_fdcl == 0)
         {
-            if(nat[i] == ' ')
-                ++sn;
-            ++i;
+            sprintf(stb[stb_idx].name, "%s", name);
+            sprintf(stb[stb_idx].type, "%s", type);
+            sprintf(stb[stb_idx].kind, "%s", "function");
+            stb[stb_idx].scope = s;
+            sprintf(stb[stb_idx].attribute, "%s", attr);
+            stb[stb_idx].flag = 0;
+            stb[stb_idx].func_fdcl = func_fdcl;
+            ++stb_idx;
         }
-        strncpy(att, nat+i, strlen(nat));
-        sprintf(stb[stb_idx].name, "%s", tn);
-        sprintf(stb[stb_idx].type, "%s", tt);
-        sprintf(stb[stb_idx].kind, "%s", "function");
-        stb[stb_idx].scope = s;
-        sprintf(stb[stb_idx].attribute, "%s", att);
+        if(k == 1)
+        {
+            sprintf(stb[stb_idx].name, "%s", name);
+            sprintf(stb[stb_idx].type, "%s", type);
+            sprintf(stb[stb_idx].kind, "%s", "variable");
+            stb[stb_idx].scope = s;
+            stb[stb_idx].flag = 0;
+            stb[stb_idx].func_fdcl = func_fdcl;
+            ++stb_idx;
+        }
+        if(k == 2)
+        {
+            sprintf(stb[stb_idx].name, "%s", name);
+            sprintf(stb[stb_idx].type, "%s", type);
+            sprintf(stb[stb_idx].kind, "%s", "parameter");
+            stb[stb_idx].scope = s;
+            stb[stb_idx].flag = 0;
+            stb[stb_idx].func_fdcl = func_fdcl;
+            ++stb_idx;
+        }
     }
-    else if(k == 1)
-    {
-        sscanf(nat, "%s %s", tt, tn);
-        sprintf(stb[stb_idx].name, "%s", tn);
-        sprintf(stb[stb_idx].type, "%s", tt);
-        sprintf(stb[stb_idx].kind, "%s", "variable");
-        stb[stb_idx].scope = s;
-    }
-    else
-    {
-        sscanf(nat, "%s %s", tt, tn);
-        sprintf(stb[stb_idx].name, "%s", tn);
-        sprintf(stb[stb_idx].type, "%s", tt);
-        sprintf(stb[stb_idx].kind, "%s", "parameter");
-        stb[stb_idx].scope = s;
-
-    }
-
-    ++stb_idx;
 }
 
 void semantic_error(int t, char name[])
 {
     /* 
-    *   t = 0 : check redeclare error
+    *   t = 0 : check redeclare variable error
+    *   t = 3 : check redeclare function error
     *   t = 1 : check undeclare variable error
     *   t = 2 : check undeclare function error
     */
@@ -388,6 +365,16 @@ void semantic_error(int t, char name[])
             sprintf(errmsg1, "%s", "\n|-----------------------------------------------|\n");
             sprintf(errmsg1, "%s| Error found in line %d: ", errmsg1, yylineno+1);
             sprintf(errmsg2, "| Redeclared variable %s", name);
+            sprintf(errmsg2, "%s\n|-----------------------------------------------|\n\n", errmsg2);
+        }
+    }
+    else if(t == 3)
+    {
+        if(lookup_symbol(name) == 2)
+        {
+            sprintf(errmsg1, "%s", "\n|-----------------------------------------------|\n");
+            sprintf(errmsg1, "%s| Error found in line %d: ", errmsg1, yylineno+1);
+            sprintf(errmsg2, "| Redeclared function %s", name);
             sprintf(errmsg2, "%s\n|-----------------------------------------------|\n\n", errmsg2);
         }
     }
@@ -418,7 +405,7 @@ int lookup_symbol(char check[])
     int i, equal_num = 0, larger_num = 0;
     for(i = 0; i < stb_idx; ++i)
     {
-        if(!strcmp(stb[i].name, check) && Scope == stb[i].scope)
+        if(!strcmp(stb[i].name, check) && Scope == stb[i].scope && stb[i].flag == 0 && stb[i].func_fdcl == 0)
             equal_num++;
         if(!strcmp(stb[i].name, check) && Scope >= stb[i].scope)
             larger_num++;
