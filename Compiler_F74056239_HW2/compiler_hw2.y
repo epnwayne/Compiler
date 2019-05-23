@@ -31,12 +31,9 @@ int stb_idx = 0;//symble table index
 int Scope = 0;
 int se_flag = 0;//semantic error check flag 0-> rv, 3-> rf, 1-> uv, 2-> uf 
 int syerr = 0;//syntax error
+int rf_flag = 0;//check if there is a rf error
 char errmsg1[500] = {0};//error msg
 char errmsg2[500] = {0};
-/*
-    uflag:
-    1 -> check variable, 2-> check function
-*/
 char tn[30] = {0};//current declaration variable name
 %}
 
@@ -183,8 +180,8 @@ while_content
 func_declaration 
     : type ID LB func_parameter RB LCB func_content RCB { semantic_error(3, $2); insert_symbol(0, $2, $1, $4, Scope, 0); }
     | type ID LB RB LCB func_content RCB { semantic_error(3, $2); insert_symbol(0, $2, $1, "", Scope, 0); }  
-    | type ID LB func_parameter RB SEMICOLON { semantic_error(3, $2); insert_symbol(0, $2, $1, $4, Scope, 1); }
-    | type ID LB RB SEMICOLON { semantic_error(3, $2); insert_symbol(0, $2, $1, "", Scope, 1); }
+    | type ID LB func_parameter RB SEMICOLON { rf_flag = 1; semantic_error(3, $2); rf_flag = 0; insert_symbol(0, $2, $1, $4, Scope, 1); }
+    | type ID LB RB SEMICOLON { rf_flag = 1; semantic_error(3, $2); rf_flag = 0; insert_symbol(0, $2, $1, "", Scope, 1); }
 ;
 
 func_content
@@ -313,10 +310,16 @@ void create_symbol()
 }
 void insert_symbol(int k, char name[], char type[], char attr[], int s, int func_fdcl) 
 {
+    int i = 0, flag = 0;
+    for(i = 0; i < stb_idx; ++i)
+    {
+        if(!strcmp(name, stb[i].name))
+            return;
+    }
     if(!strcmp("", errmsg1))
     {
         //k: 0->func, 1->variable, 2-> parameter
-        if(k == 0 && func_fdcl == 0)
+        if(k == 0 /*&& func_fdcl == 0*/)
         {
             sprintf(stb[stb_idx].name, "%s", name);
             sprintf(stb[stb_idx].type, "%s", type);
@@ -354,7 +357,7 @@ void semantic_error(int t, char name[])
 {
     /* 
     *   t = 0 : check redeclare variable error
-    *   t = 3 : check redeclare function error
+    *   t = 3 : check redefine and redeclare function error
     *   t = 1 : check undeclare variable error
     *   t = 2 : check undeclare function error
     */
@@ -405,10 +408,18 @@ int lookup_symbol(char check[])
     int i, equal_num = 0, larger_num = 0;
     for(i = 0; i < stb_idx; ++i)
     {
-        if(!strcmp(stb[i].name, check) && Scope == stb[i].scope && stb[i].flag == 0 && stb[i].func_fdcl == 0)
-            equal_num++;
-        if(!strcmp(stb[i].name, check) && Scope >= stb[i].scope)
-            larger_num++;
+        if(rf_flag)
+        {
+            if(!strcmp(stb[i].name, check) && Scope == stb[i].scope && stb[i].flag == 0)
+                equal_num++;
+        }
+        else
+        {
+            if(!strcmp(stb[i].name, check) && Scope == stb[i].scope && stb[i].flag == 0 && stb[i].func_fdcl == 0)
+                equal_num++;
+            if(!strcmp(stb[i].name, check) && Scope >= stb[i].scope)
+                larger_num++;
+        }
     }
     if(equal_num > 0)
         return 2;
@@ -419,6 +430,7 @@ int lookup_symbol(char check[])
 }
 void dump_symbol(int s) {
     int i, f = 0;
+
     for(i = 0; i < stb_idx; ++i)
         if(stb[i].scope == s)
         {    
@@ -432,6 +444,7 @@ void dump_symbol(int s) {
     {
         for(i = 0; i < stb_idx; ++i)
         {
+            //printf("name = %s, fdcl = %d, scope = %d\n", stb[i].name, stb[i].func_fdcl, stb[i].scope);
             if(!stb[i].flag)
             {
                 printf("%-10d%-10s%-12s%-10s%-10d%s",
@@ -447,6 +460,7 @@ void dump_symbol(int s) {
     {
         for(i = 0; i < stb_idx; ++i)
         {
+            //printf("name = %s, fdcl = %d, scope = %d\n", stb[i].name, stb[i].func_fdcl, stb[i].scope);
             if(!stb[i].flag && stb[i].scope == s && stb[i].scope != 0)
             {
                 printf("%-10d%-10s%-12s%-10s%-10d%s",
